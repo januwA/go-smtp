@@ -1,4 +1,4 @@
-package gosmtpcurl
+package smtpcurl
 
 /*
 #cgo pkg-config: libcurl

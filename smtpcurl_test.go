@@ -1,4 +1,4 @@
-package gosmtpcurl
+package smtpcurl
 
 import (
 	"os"
