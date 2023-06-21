@@ -5,17 +5,27 @@
 #include <curl/curl.h>
 #include "smtp-mime.h"
 
-const char LEFT_ARROW = '<';
-const char RIGHT_ARROW = '>';
+#define FREE_CHAR_PTR(name) \
+  if (name != NULL)         \
+  {                         \
+    free(name);             \
+    name = NULL;            \
+  }
 
-static const char *FROM_LABEL = "From: ";
-static const size_t FROM_LABE_LEN = 6;
+/**cpp通常由go管理内存，所以在这里不用释放内存*/
+#define FREE_GO_CPP(name)          \
+  if (name != NULL)                \
+  {                                \
+    for (char **i = name; *i; i++) \
+    {                              \
+      free(*i);                    \
+      *i = NULL;                   \
+    }                              \
+  }
 
-static const char *TO_LABEL = "To: ";
-static const size_t TO_LABE_LEN = 4;
-
-static const char *SUBJECT_LABEL = "Subject: ";
-static const size_t SUBJECT_LABE_LEN = 9;
+#define CHECK_RES()    \
+  if (res != CURLE_OK) \
+    goto exit_send;
 
 struct MemPart *NewMemPart()
 {
@@ -29,15 +39,8 @@ void DestroyMemPart(struct MemPart *part)
     return;
 
   // 释放header的每个字符串
-  if (part->headers != NULL)
-  {
-    for (char **i = part->headers; *i; i++)
-      free(*i);
+  FREE_GO_CPP(part->headers);
 
-    // 这个指针由go管理
-    // free(part->headers);
-    // part->headers = NULL;
-  }
   free(part);
 }
 
@@ -47,13 +50,6 @@ struct SmtpMimeOptions *NewSmtpMimeOptions()
   return opt;
 }
 
-#define FREE_CHAR_PTR(name) \
-  if (name != NULL)         \
-  {                         \
-    free(name);             \
-    name = NULL;            \
-  }
-
 void DestroySmtpMimeOptions(struct SmtpMimeOptions *opt)
 {
   if (opt == NULL)
@@ -62,25 +58,21 @@ void DestroySmtpMimeOptions(struct SmtpMimeOptions *opt)
   FREE_CHAR_PTR(opt->url);
   FREE_CHAR_PTR(opt->username);
   FREE_CHAR_PTR(opt->password);
+  FREE_CHAR_PTR(opt->authzid);
   FREE_CHAR_PTR(opt->loginOptions);
-  FREE_CHAR_PTR(opt->from);
-  FREE_CHAR_PTR(opt->to);
-  FREE_CHAR_PTR(opt->subject);
+  FREE_CHAR_PTR(opt->from_addr);
   FREE_CHAR_PTR(opt->text);
   FREE_CHAR_PTR(opt->html);
   FREE_CHAR_PTR(opt->html_type);
-  FREE_CHAR_PTR(opt->mime_encoder);
   FREE_CHAR_PTR(opt->mime_type);
+  FREE_CHAR_PTR(opt->mime_encoder);
+  FREE_CHAR_PTR(opt->ca_info);
+  FREE_CHAR_PTR(opt->ca_path);
+  FREE_CHAR_PTR(opt->custom_request);
 
-  if (opt->filePaths != NULL)
-  {
-    for (char **i = opt->filePaths; *i; i++)
-      free(*i);
-
-    // 这个指针由go管理
-    // free(opt->filePaths);
-    // opt->filePaths = NULL;
-  }
+  FREE_GO_CPP(opt->rcpt);
+  FREE_GO_CPP(opt->http_header);
+  FREE_GO_CPP(opt->filePaths);
 
   if (opt->mem_parts != NULL)
   {
@@ -94,10 +86,6 @@ void DestroySmtpMimeOptions(struct SmtpMimeOptions *opt)
 
   free(opt);
 }
-
-#define CHECK_RES()    \
-  if (res != CURLE_OK) \
-    goto exit_send;
 
 CURLcode smtp_mime(struct SmtpMimeOptions *opt)
 {
@@ -113,8 +101,11 @@ CURLcode smtp_mime(struct SmtpMimeOptions *opt)
   curl = curl_easy_init();
   if (curl)
   {
-    res = curl_easy_setopt(curl, CURLOPT_URL, opt->url);
-    CHECK_RES()
+    if (opt->url != NULL)
+    {
+      res = curl_easy_setopt(curl, CURLOPT_URL, opt->url);
+      CHECK_RES()
+    }
 
     if (opt->username != NULL)
     {
@@ -125,6 +116,12 @@ CURLcode smtp_mime(struct SmtpMimeOptions *opt)
     if (opt->password != NULL)
     {
       res = curl_easy_setopt(curl, CURLOPT_PASSWORD, opt->password);
+      CHECK_RES();
+    }
+
+    if (opt->authzid != NULL)
+    {
+      res = curl_easy_setopt(curl, CURLOPT_SASL_AUTHZID, opt->authzid);
       CHECK_RES();
     }
 
@@ -150,69 +147,56 @@ CURLcode smtp_mime(struct SmtpMimeOptions *opt)
       CHECK_RES();
     }
 
-    /** from */
-    char *from_addr_begin = strchr(opt->from, LEFT_ARROW);
-    char *from_addr_end = strchr(from_addr_begin, RIGHT_ARROW);
-
-    size_t from_addr_len = from_addr_end - from_addr_begin + sizeof(char);
-    char from_addr[from_addr_len + sizeof(char)];
-
-    memcpy(from_addr, from_addr_begin, from_addr_len);
-    if (opt->debug)
-      fprintf(stdout, "From Addr: %s\n", from_addr);
-
-    res = curl_easy_setopt(curl, CURLOPT_MAIL_FROM, from_addr);
-    CHECK_RES();
-
-    /* to */
-    size_t begin = 0, end = 0;
-    for (size_t i = 0; i < strlen(opt->to); i++)
+    if (opt->ca_info != NULL)
     {
-      char c = opt->to[i];
-      if (c == LEFT_ARROW)
-      {
-        begin = i;
-        continue;
-      }
-
-      if (c == RIGHT_ARROW)
-      {
-        end = i;
-        size_t len = end - begin + sizeof(char);
-        char to_addr[len + sizeof(char)];
-        memcpy(to_addr, opt->to + begin, len);
-
-        if (opt->debug)
-          fprintf(stdout, "To Addr: %s\n", to_addr);
-
-        recipients = curl_slist_append(recipients, to_addr);
-      }
+      // /path/to/certificate.pem
+      res = curl_easy_setopt(curl, CURLOPT_CAINFO, opt->ca_info);
+      CHECK_RES();
     }
 
-    res = curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
-    CHECK_RES();
+    if (opt->ca_info_blob != NULL)
+    {
+      struct curl_blob blob;
+      blob.data = opt->ca_info_blob;
+      blob.len = opt->ca_info_blob_len;
+      blob.flags = opt->ca_info_blob_flags;
+      res = curl_easy_setopt(curl, CURLOPT_CAINFO_BLOB, &blob);
+      CHECK_RES();
+    }
 
-    /* 构建并设置消息头列表 */
-    char _from[FROM_LABE_LEN + strlen(opt->from) + sizeof(char)];
-    sprintf(_from, "%s%s", FROM_LABEL, opt->from);
-    if (opt->debug)
-      fprintf(stdout, "%s\n", _from);
+    if (opt->ca_path != NULL)
+    {
+      res = curl_easy_setopt(curl, CURLOPT_CAPATH, opt->ca_path);
+      res = curl_easy_setopt(curl, CURLOPT_CAINFO_BLOB, opt->ca_path);
+      CHECK_RES();
+    }
 
-    char _to[TO_LABE_LEN + strlen(opt->to) + sizeof(char)];
-    sprintf(_to, "%s%s", TO_LABEL, opt->to);
-    if (opt->debug)
-      fprintf(stdout, "%s\n", _to);
+    /** from */
+    if (opt->from_addr != NULL)
+    {
+      res = curl_easy_setopt(curl, CURLOPT_MAIL_FROM, opt->from_addr);
+      CHECK_RES();
+    }
 
-    char _subject[SUBJECT_LABE_LEN + strlen(opt->subject) + sizeof(char)];
-    sprintf(_subject, "%s%s", SUBJECT_LABEL, opt->subject);
-    if (opt->debug)
-      fprintf(stdout, "%s\n", _subject);
+    /* rcpt */
+    if (opt->rcpt != NULL)
+    {
+      for (char **i = opt->rcpt; *i; i++)
+        recipients = curl_slist_append(recipients, *i);
 
-    headers = curl_slist_append(headers, _from);
-    headers = curl_slist_append(headers, _to);
-    headers = curl_slist_append(headers, _subject);
-    res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    CHECK_RES();
+      res = curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
+      CHECK_RES();
+    }
+
+    /* header */
+    if (opt->http_header != NULL)
+    {
+      for (char **i = opt->http_header; *i; i++)
+        headers = curl_slist_append(headers, *i);
+
+      res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+      CHECK_RES();
+    }
 
     mime = curl_mime_init(curl);
     alt = curl_mime_init(curl);
@@ -242,8 +226,8 @@ CURLcode smtp_mime(struct SmtpMimeOptions *opt)
 
     part = curl_mime_addpart(mime);
     res = curl_mime_subparts(part, alt); /**之后不能再显示释放alt*/
-    is_free_alt = 0;
     CHECK_RES();
+    is_free_alt = 0;
 
     res = curl_mime_type(part, opt->mime_type);
     CHECK_RES();
@@ -273,21 +257,32 @@ CURLcode smtp_mime(struct SmtpMimeOptions *opt)
         struct MemPart *memPart = *i;
 
         part = curl_mime_addpart(mime);
-        curl_mime_data(part, memPart->mem, memPart->size);
+        res = curl_mime_data(part, memPart->mem, memPart->size);
+        CHECK_RES();
 
         if (memPart->headers != NULL)
         {
           struct curl_slist *slist = NULL;
           for (char **h = memPart->headers; *h; h++)
             slist = curl_slist_append(slist, *h);
+
           if (slist != NULL)
-            curl_mime_headers(part, slist, 1);
+          {
+            res = curl_mime_headers(part, slist, 1);
+            CHECK_RES();
+          }
         }
       }
     }
 
     res = curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
     CHECK_RES();
+
+    if (opt->custom_request != NULL)
+    {
+      res = curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, opt->custom_request);
+      CHECK_RES();
+    }
 
     res = curl_easy_setopt(curl, CURLOPT_VERBOSE, opt->debug);
     CHECK_RES();

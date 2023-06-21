@@ -16,14 +16,18 @@ func TestSmtpMime(t *testing.T) {
 	opt.Username = "1641845087@qq.com"
 	opt.Password = os.Getenv("QQ_EMAIL_PWD")
 
-	// opt.From = "<1641845087@qq.com>"
-	opt.From = "16418 <1641845087@qq.com>"
+	opt.FromAddr = "<1641845087@qq.com>"
 
-	// opt.To = "<ajanuw1995@gmail.com>"
-	// opt.To = "foo <ajanuw1995@gmail.com>"
-	opt.To = "foo <ajanuw1995@gmail.com>, bar <ajanuw1641845087@sina.com>"
+	opt.HttpHeader = []string{
+		"From: 16418 <1641845087@qq.com>",
+		"To: foo <ajanuw1995@gmail.com>, bar <ajanuw1641845087@sina.com>",
+		"Subject: Hello",
+	}
 
-	opt.Subject = "hello"
+	opt.Rcpt = []string{
+		"<ajanuw1995@gmail.com>",
+		"<ajanuw1641845087@sina.com>",
+	}
 
 	// opt.Text = "<h1 style=\"color: red;\">Hello World</h1>"
 
@@ -37,8 +41,7 @@ func TestSmtpMime(t *testing.T) {
 
 	opt.MemParts = []MemPart{
 		{
-			Mem:  []byte("abc"),
-			Size: 2,
+			Mem: []byte("abc"),
 			Headers: []string{
 				"Content-Disposition: attachment; filename=\"a.txt\"",
 				"Content-Type: inode/x-empty",
