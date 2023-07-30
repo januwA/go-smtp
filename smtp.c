@@ -3,7 +3,7 @@
 #include <string.h>
 #include <libgen.h>
 #include <curl/curl.h>
-#include "smtp-mime.h"
+#include "smtp.h"
 
 #define FREE_CHAR_PTR(name) \
   if (name != NULL)         \
@@ -87,7 +87,7 @@ void DestroySmtpMimeOptions(struct SmtpMimeOptions *opt)
   free(opt);
 }
 
-CURLcode smtp_mime(struct SmtpMimeOptions *opt)
+CURLcode sendSmtp(struct SmtpMimeOptions *opt)
 {
   CURL *curl;
   CURLcode res = CURLE_OK;

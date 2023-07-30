@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSmtpMime(t *testing.T) {
+func TestSend(t *testing.T) {
 	opt := NewSmtpOptions()
 	// opt.Url = "smtps://smtp.qq.com"
 	// opt.UseSSL = 1
@@ -51,7 +51,7 @@ func TestSmtpMime(t *testing.T) {
 
 	opt.Debug = 1
 
-	err := SmtpMime(opt)
+	err := Send(opt)
 	if err != nil {
 		t.Error(err)
 	}

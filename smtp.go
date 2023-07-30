@@ -4,7 +4,7 @@ package smtpcurl
 #cgo pkg-config: libcurl
 
 #include <curl/curl.h>
-#include "smtp-mime.h"
+#include "smtp.h"
 */
 import "C"
 import (
@@ -83,7 +83,7 @@ func strArr2CPP(arr []string) **C.char {
 	return (**C.char)(unsafe.Pointer(&paths[0]))
 }
 
-func SmtpMime(options *SmtpOptions) error {
+func Send(options *SmtpOptions) error {
 	opt := C.NewSmtpMimeOptions()
 
 	defer func() {
@@ -162,7 +162,7 @@ func SmtpMime(options *SmtpOptions) error {
 
 	opt.debug = C.long(options.Debug)
 
-	res := C.smtp_mime(opt)
+	res := C.sendSmtp(opt)
 	if res != 0 {
 		return errors.New(C.GoString(C.curl_easy_strerror(res)))
 	}

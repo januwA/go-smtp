@@ -63,7 +63,7 @@ extern "C"
 
   void DestroySmtpMimeOptions(struct SmtpMimeOptions *opt);
 
-  CURLcode smtp_mime(struct SmtpMimeOptions *opt);
+  CURLcode sendSmtp(struct SmtpMimeOptions *opt);
 #ifdef __cplusplus
 }
 #endif // __cplusplus
